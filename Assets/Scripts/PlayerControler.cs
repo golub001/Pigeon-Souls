@@ -3,6 +3,7 @@ using UnityEngine.InputSystem;
 
 public class PlayerControler : MonoBehaviour
 {
+    [Header("Movement Settings")]
     [SerializeField] private float speed = 1f;
     [SerializeField] private float jumpHeight = 0.2f;
     [SerializeField] private float gravity = -9.8f;
@@ -15,6 +16,7 @@ public class PlayerControler : MonoBehaviour
 
     private Animator animator;
     private CharacterController controller;
+
     private Vector2 rawInput;
     private Vector2 smoothInput;
     private Vector2 smoothVelocity;
@@ -32,26 +34,26 @@ public class PlayerControler : MonoBehaviour
         animator = GetComponent<Animator>();
     }
 
+    // --- Input ---
     public void OnMove(InputAction.CallbackContext context)
     {
-        rawInput = context.ReadValue<Vector2>();
+        if (!isRolling) // ignoriši input tokom roll-a
+            rawInput = context.ReadValue<Vector2>();
     }
 
     public void OnJump(InputAction.CallbackContext context)
     {
-        if (context.performed && controller.isGrounded && !isRolling)
-        {
+        if (!isRolling && context.performed && controller.isGrounded)
             velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
-        }
     }
 
     public void OnRoll(InputAction.CallbackContext context)
     {
         if (context.performed && !isRolling && Time.time > lastRollTime + rollCooldown)
         {
-            // Ako se kreće - roll ide u pravcu kretanja, inače napred
+            // Roll ide u pravcu kretanja ili napred ako nema inputa
             if (smoothInput.sqrMagnitude > 0.01f)
-                rollDirection = new Vector3(smoothInput.x, 0, smoothInput.y).normalized;
+                rollDirection = (Camera.main.transform.forward * smoothInput.y + Camera.main.transform.right * smoothInput.x).normalized;
             else
                 rollDirection = transform.forward;
 
@@ -59,67 +61,67 @@ public class PlayerControler : MonoBehaviour
             rollTimer = rollDuration;
             lastRollTime = Time.time;
 
-            animator.SetTrigger("Roll"); // Animator trigger
+            animator.SetTrigger("Roll");
             Debug.Log("Roll aktiviran!");
-
         }
     }
 
     private void Update()
     {
-        // Ako traje roll
+        // --- Roll logika ---
         if (isRolling)
         {
             controller.Move(rollDirection * rollSpeed * Time.deltaTime);
             rollTimer -= Time.deltaTime;
 
             if (rollTimer <= 0f)
-            {
                 isRolling = false;
-            }
-            return; // prekida ostatak Update dok traje roll
+
+            return; // preskoči normalno kretanje dok traje roll
         }
 
-        // Deadzone za raw input
-        if (Mathf.Abs(rawInput.x) < 0.01f) rawInput.x = 0;
-        if (Mathf.Abs(rawInput.y) < 0.01f) rawInput.y = 0;
+        // --- Smooth input ---
+        smoothInput = Vector2.SmoothDamp(
+            smoothInput,
+            rawInput,
+            ref smoothVelocity,
+            1f / inputSmoothSpeed
+        );
 
-        // SmoothDamp po X i Z osi
-        smoothInput.x = Mathf.SmoothDamp(smoothInput.x, rawInput.x, ref smoothVelocity.x, 1f / inputSmoothSpeed);
-        smoothInput.y = Mathf.SmoothDamp(smoothInput.y, rawInput.y, ref smoothVelocity.y, 1f / inputSmoothSpeed);
+        // --- Movement u odnosu na kameru ---
+        Vector3 camForward = Camera.main.transform.forward;
+        Vector3 camRight = Camera.main.transform.right;
+        camForward.y = 0f; camRight.y = 0f;
+        camForward.Normalize(); camRight.Normalize();
 
-        // Deadzone za smooth input
-        if (Mathf.Abs(smoothInput.x) < 0.01f) smoothInput.x = 0;
-        if (Mathf.Abs(smoothInput.y) < 0.01f) smoothInput.y = 0;
+        Vector3 move = camForward * smoothInput.y + camRight * smoothInput.x;
 
-        Vector3 move = new Vector3(smoothInput.x, 0, smoothInput.y);
-        Vector3 localMove = transform.InverseTransformDirection(move);
-
-        // --- Sprint logika ---
+        // --- Sprint ---
         bool sprintHeld = Keyboard.current.leftShiftKey.isPressed;
         animator.SetBool("Sprint", sprintHeld);
-
         float currentSpeed = sprintHeld ? speed * 1.5f : speed;
 
-        // Pomeri CharacterController
-        controller.Move(move * currentSpeed * Time.deltaTime);
+        // --- Gravity ---
+        if (!controller.isGrounded)
+            velocity.y += gravity * Time.deltaTime;
+        else if (velocity.y < 0)
+            velocity.y = 0;
 
-        // Pošalji animatoru glatke vrednosti
+        // --- Move CharacterController ---
+        controller.Move(move * currentSpeed * Time.deltaTime + velocity * Time.deltaTime);
+
+        // --- Animator ---
+        Vector3 localMove = transform.InverseTransformDirection(move);
         animator.SetFloat("MoveX", Mathf.Clamp(localMove.x, -1f, 1f));
         animator.SetFloat("MoveZ", Mathf.Clamp(localMove.z, -1f, 1f));
-
         bool isMoving = smoothInput.sqrMagnitude > 0.01f;
         animator.SetBool("IsMoving", isMoving);
 
-        // Rotacija lika u smer kretanja
+        // --- Rotacija lika u smer kretanja ---
         if (isMoving)
         {
             Quaternion targetRotation = Quaternion.LookRotation(move, Vector3.up);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10f);
         }
-
-        // Gravity
-        velocity.y += gravity * Time.deltaTime;
-        controller.Move(velocity * Time.deltaTime);
     }
 }
