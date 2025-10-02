@@ -72,6 +72,4 @@ sysinfo.txt
 # Temporary editor / cache / screenshots
 /[Aa]ssets/**/Cache/
 *[Bb]ackup*.*
-*.png
-*.jpg
 /[Aa]ssets/Editor/Temp/
